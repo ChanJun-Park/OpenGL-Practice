@@ -32,60 +32,68 @@ class MashGradientEffectRenderer : GLSurfaceView.Renderer {
 	private val fragmentShaderCode = """
 		precision mediump float;
 
-		uniform float u_Time;
+		uniform float u_Time;   // 초 단위 시간
 		varying vec2 v_UV;
 		
-		// Gradient 중심 위치 정의
-		vec2 baseCenter1 = vec2(0.5, 0.5);
-		vec2 baseCenter2 = vec2(0.5, 0.5);
-		const float PI = 3.14159265359;
+		// 편의를 위한 상수
+		const float PI     = 3.14159265359;
+		const float TWO_PI = 6.28318530718;
 		
 		void main() {
-			// 시간 기반 원운동 궤적 생성
-			float radius1 = 0.10;
-			float radius2 = 0.10;
-			
-			float speed = 1.0; // 회전 속도 (radians/sec)
-			vec2 offset1 = vec2(
-				cos(u_Time * speed),
-				sin(u_Time * speed)
-			) * radius1;
-			
-			vec2 offset2 = vec2(
-				cos(u_Time * speed + PI),
-				sin(u_Time * speed + PI)
-			) * radius2;
-			
-			vec2 center1 = baseCenter1 + offset1;
-			vec2 center2 = baseCenter2 + offset2;
+			// 흰 배경
+			vec3 bg = vec3(1.0);
 		
-			float minimumDistance = distance(center1, center2);
+			// 두 radial의 기준 중심 (UV 공간 0~1)
+			vec2 baseCenter = vec2(0.5, 0.5);
 		
-			// 거리 기반 밝기 계산
-			float d1 = distance(v_UV, center1);
-			float d2 = distance(v_UV, center2);
+			// 회전 반지름(중심에서 얼마나 떨어질지)
+			float R = 0.15;
 		
-			float brightness1 = 1.0 - smoothstep(0.0, 0.3, d1);
-			float brightness2 = 1.0 - smoothstep(0.0, 0.3, d2);
-			
-			// float brightness1 = d1 >= 0.2 ? 1.0 : 0.0;
-			// float brightness2 = d2 >= 0.2 ? 1.0 : 0.0;
-			
-			float totalBrightness = brightness1 + brightness2 + 0.0001;
-			
-			float weight = 2.0 - smoothstep(0.0, 2.0, d1 + d2);
+			// 각속도(회전 속도). 하나는 +, 하나는 -로 반대 방향
+			float w1 = 0.8;   // 보라
+			float w2 = 0.8;  // 파랑 (반대방향)
+		
+			// 시간 기반 각도
+			float a1 = u_Time * w1;
+			float a2 = u_Time * w2 + PI;
+		
+			// 원운동 offset (반지름 R)
+			vec2 c1 = baseCenter + R * vec2(cos(a1), sin(a1));  // 보라
+			vec2 c2 = baseCenter + R * vec2(cos(a2), sin(a2));  // 파랑
+		
+			// 거리 계산
+			float d1 = distance(v_UV, c1);
+			float d2 = distance(v_UV, c2);
+		
+			// 부드러운 가장자리(라디얼 falloff)
+			// innerRadius 근처가 가장 밝고, outerRadius에서 사라짐
+			float outer = 0.30;
+		
+			// 밝기(coverage 소스). 0~1
+			float b1 = 1.0 - smoothstep(0.0, outer, d1);
+			float b2 = 1.0 - smoothstep(0.0, outer, d2);
+		
+			// 색상 (이전 대화에서 변환한 값 사용)
+			// 보라: #A553FF -> (0.6471, 0.3255, 1.0)
+			// 파랑: #6C8EFF -> (0.4235, 0.5569, 1.0)
+			vec3 col1 = vec3(0.6471, 0.3255, 1.0);
+			vec3 col2 = vec3(0.4235, 0.5569, 1.0);
+		
+			// vec3 col1 = vec3(0.0, 0.0, 1.0);
+			// vec3 col2 = vec3(1.0, 0.0, 0.0);
 
-			vec3 color1 = vec3(1.0, 1.0, 1.0) - vec3(0.6471, 0.3255, 1.0);
-			vec3 color2 = vec3(1.0, 1.0, 1.0) - vec3(0.4235, 0.5569, 1.0);
+			// 정규화된 혼합(가중 평균) — 겹쳐도 하얗게 날아가지 않음
+			float total = b1 + b2 + 1e-4;
+			vec3  mash  = (col1 * b1 + col2 * b2) / total;
 		
-			vec3 finalColor = (color1 * brightness1 + color2 * brightness2);
-			// vec3 finalColor = (color1 * brightness1 + color2 * brightness2) / weight;
-			// vec3 finalColor = (color1 * brightness1 + color2 * brightness2) / 2.0;
-			
-			vec3 inverse = vec3(1.0, 1.0, 1.0) - finalColor;
+			// 커버리지: 두 라디얼의 합으로 얼마나 “덮을지” 결정
+			// 스케일 팩터(예: 1.0)로 농도 조절 가능
+			float coverage = clamp(total * 1.0, 0.0, 1.0);
 		
-			// gl_FragColor = vec4(finalColor, 1.0);
-			gl_FragColor = vec4(inverse, 1.0);
+			// 흰 배경과 mix → 밝기가 0인 곳은 흰색 유지
+			vec3 finalColor = mix(bg, mash, coverage);
+		
+			gl_FragColor = vec4(finalColor, 1.0);
 		}
     """.trimIndent()
 	// endregion
@@ -168,7 +176,7 @@ class MashGradientEffectRenderer : GLSurfaceView.Renderer {
 		lastMs = currentTimeMillis
 		accumulatedTime += t
 		if (accumulatedTime > 10f) {
-			accumulatedTime %= (2f * Math.PI.toFloat())
+			accumulatedTime %= (2f * Math.PI.toFloat() / 0.8f)
 		}
 		GLES20.glUniform1f(uTimeLocation, accumulatedTime)
 
