@@ -6,7 +6,7 @@ import android.opengl.GLSurfaceView
 
 class MyGLSurfaceView(context: Context) : GLSurfaceView(context) {
 
-    private val renderer = MashGradientEffectRenderer()
+    private val renderer = BoxShadowRenderer()
 
     init {
         // OpenGL ES 2.0 컨텍스트 사용
