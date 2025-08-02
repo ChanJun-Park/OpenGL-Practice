@@ -5,17 +5,21 @@ import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import com.example.myopengltest.databinding.ActivityMainBinding
 
 class MainActivity : AppCompatActivity() {
 
 	private lateinit var glView: MyGLSurfaceView
+	private lateinit var binding: ActivityMainBinding
 
 	override fun onCreate(savedInstanceState: Bundle?) {
 		super.onCreate(savedInstanceState)
 		enableEdgeToEdge()
-		glView = MyGLSurfaceView(this)
-		setContentView(glView)
-		ViewCompat.setOnApplyWindowInsetsListener(glView) { v, insets ->
+		binding  = ActivityMainBinding.inflate(layoutInflater)
+//		glView = MyGLSurfaceView(this)
+//		setContentView(glView)
+		setContentView(binding.root)
+		ViewCompat.setOnApplyWindowInsetsListener(binding.root) { v, insets ->
 			val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
 			v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
 			insets
@@ -24,11 +28,9 @@ class MainActivity : AppCompatActivity() {
 
 	override fun onResume() {
 		super.onResume()
-		glView.onResume()
 	}
 
 	override fun onPause() {
-		glView.onPause()
 		super.onPause()
 	}
 }

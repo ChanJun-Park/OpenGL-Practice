@@ -1,7 +1,8 @@
-package com.example.myopengltest
+package com.example.myopengltest.shadowview
 
+import android.graphics.RectF
 import android.opengl.GLES20
-import android.opengl.GLSurfaceView
+import android.opengl.GLSurfaceView.Renderer
 import android.util.Log
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -9,95 +10,18 @@ import java.nio.FloatBuffer
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 
-class BoxShadowRenderer : GLSurfaceView.Renderer {
+class GradientShadowRenderer: Renderer {
+	val buttonRect = RectF(100f, 300f, 100f + 220f, 300f + 64f)
+	var radiusPx = 24f
+	var blurPx = 140f
+	var shadowOffset = floatArrayOf(0f, 12f)
+	var softness = 36f
+	var shadowColor = floatArrayOf(0.396f, 0.89f, 1.0f, 1f) // 기본 청록
+	var color1 = floatArrayOf(0.396f, 0.89f, 1.0f, 1f) // 기본 청록
+	var color2 = floatArrayOf(1.0f, 0.49f, 0.85f, 1f) // 기본 핑크
+	var backgroundColor = floatArrayOf(1f, 1f, 1f, 1f) // 기본 배경색
 
-	// region === 셰이더 소스 ===
-	// Vertex Shader: vec2 정점 좌표를 받아 동차좌표(vec4)로 확장
-	private val vertexShaderCode = """
-		attribute vec2 a_Position;
-		varying vec2 v_UV;
-		uniform float u_AspectInv;
-		
-		void main() {
-			vec2 pos = a_Position;
-			pos.x *= u_AspectInv;
-			// pos.y /= u_AspectInv;
-			// [-1,1] → [0,1]로 정규화
-			v_UV = (a_Position + 1.0) * 0.5;
-			gl_Position = vec4(pos, 0.0, 1.0);
-		}
-    """.trimIndent()
-
-	// Fragment Shader: 단색 렌더링 (u_Color로 주입)
-	private val fragmentShaderCode = """
-		precision mediump float;
-
-		uniform float u_Time;   // 초 단위 시간
-		varying vec2 v_UV;
-		
-		// 편의를 위한 상수
-		const float PI     = 3.14159265359;
-		const float TWO_PI = 6.28318530718;
-		
-		// 라운드 사각형(축 정렬) SDF
-		// p: 중심 기준 좌표, size: 전체 폭/높이, r: 모서리 반경
-		float sdRoundRect(vec2 p, vec2 size, float r) {
-			vec2 halfSize = size * 0.5;
-			// 사각형의 모서리를 반경 r만큼 깎은 후, 초과분의 길이에서 r을 빼면 SDF
-			vec2 q = abs(p) - (halfSize - vec2(r));
-			return length(max(q, 0.0)) - r; // 모든 방향으로 r 만큼 늘렸다고 이해하면 될까?
-		}
-		
-		void main() {
-			// 1) 배경: 흰색
-			vec3 bg = vec3(1.0);
-		
-			// 2) 박스 파라미터 (UV 공간: 0~1)
-			vec2 boxCenter = vec2(0.5, 0.5); // 중앙
-			vec2 boxSize   = vec2(0.25, 0.25); // 너비/높이
-			float radius   = 0.08;             // 모서리 반경
-		
-			// (옵션) 그림자 오프셋 — 카드가 떠 있는 느낌
-			vec2 shadowOffset = vec2(0.00, 0.00); // x,y로 약간 아래/오른쪽
-		
-			// 3) 좌표 준비: 중심 기준으로 이동
-			vec2 pShadow = (v_UV - (boxCenter + shadowOffset));
-			vec2 pFill   = (v_UV - boxCenter);
-		
-			// 4) SDF 계산
-			float sdfShadow = sdRoundRect(pShadow, boxSize, radius);
-			float sdfFill   = sdRoundRect(pFill,   boxSize, radius);
-		
-			// 5) 소프트 엣지(페더) — 값이 클수록 더 멀리 퍼짐
-			float feather = 0.06; // 0.03~0.10 사이로 조절해 보세요.
-		
-			// 그림자 마스크(0~1): 경계(sdf=0)에서 안쪽(-)은 1에 가깝고 바깥(+)으로 갈수록 0
-			// shadow는 박스 "바깥쪽"으로 퍼지는 느낌이므로, 경계 바깥의 양수 영역을 사용
-			// 1.0 - smoothstep(0, feather, sdf) : sdf=0에서 1, feather에서 0
-			float shadowMask = 1.0 - smoothstep(0.0, feather, sdfShadow);
-		
-			// 6) 그림자 색/강도
-			vec3  shadowColor   = vec3(0.0, 0.0, 0.0);
-			float shadowStrength = 0.18; // 0~1: 진하기
-		
-			// 7) 박스(카드) 자체 색 (필요 없으면 주석 처리)
-			vec3  cardColor  = vec3(1.0); // 흰 카드
-			// 안쪽일수록 1.0, 바깥으로 나가며 0.0
-			float fillMask   = 1.0 - smoothstep(0.0, 0.001, sdfFill);
-		
-			// 8) 합성
-			// 배경 → 그림자 → 카드 순으로 오버
-			vec3 color = bg;
-			color = mix(color, shadowColor, shadowMask * shadowStrength); // 흰 배경 위에 그림자
-			color = mix(color, cardColor,   fillMask);                    // 그림자 위에 카드
-		
-			gl_FragColor = vec4(color, 1.0);
-		}
-    """.trimIndent()
-	// endregion
-
-	// x, y
-	// 어떤 순서로 면을 만들던 fragment shader에 전달되는 좌표는 동일한듯
+	// 화면 전체를 덮는 사각형 Vertex
 	private val quadVertices = floatArrayOf(
 		-1f,  1f,   // 좌상단
 		1f,  1f,    // 우상단
@@ -109,34 +33,106 @@ class BoxShadowRenderer : GLSurfaceView.Renderer {
 	private val BYTES_PER_FLOAT = 4
 	private val POSITION_COMPONENT_COUNT = 2 // (x, y)
 	private val STRIDE = POSITION_COMPONENT_COUNT * BYTES_PER_FLOAT
-	// endregion
 
-	// region === GL 핸들 ===
+	// === GL 핸들 ===
 	private var program = 0
 	private var aPositionLocation = 0
 	private var uTimeLocation = 0
-	private var uAspectInvLocation = 0
-	// endregion
+	private var uResolution = 0
+	private var uRadius = 0 // View 모서리 radius
+	private var uBlur = 0
+	private var uSoftness = -1
+	private var uShadowColor = -1
+	private var uColor1 = -1
+	private var uColor2 = -1
+	private var uCenter = -1
+	private var uSize = -1
+	private var uOffset = -1
 
 	// 시간 기반 애니메이션용
 	private var lastMs: Long = 0L
 	private var accumulatedTime: Float = 0f
 
+	private var dirty = true
+	private var cachedTargetViewX = 0f
+	private var cachedTargetViewY = 0f
+	private var cachedTargetViewWidth = 0f
+	private var cachedTargetViewHeight = 0f
+
+	// region === 셰이더 소스 ===
+	// Vertex Shader: vec2 정점 좌표를 받아 동차좌표(vec4)로 확장
+	private val vertexShaderCode = """
+		attribute vec4 a_Position;
+		varying vec2 v_UV;
+		
+		void main() {
+			v_UV = a_Position.xy * 0.5 + 0.5; // [0, 1] 정규화
+			gl_Position = a_Position;
+		}
+    """.trimIndent()
+
+	// Fragment Shader: 단색 렌더링 (u_Color로 주입)
+	private val fragmentShaderCode = """
+		precision mediump float;
+		
+		uniform vec2 u_Resolution; // View 가로 세로
+		uniform float u_Radius; // View 모서리 둥근 정도
+		uniform float u_Blur;
+		uniform float u_Softness;
+		uniform vec4 u_ShadowColor;
+		uniform vec4 u_Color1;
+		uniform vec4 u_Color2;
+		uniform vec2 u_Center;
+		uniform vec2 u_Size;
+		uniform vec2 u_Offset;
+		uniform float u_Time;   // 초 단위 시간
+		
+		varying vec2 v_UV;
+		
+		// 편의를 위한 상수
+		const float PI     = 3.14159265359;
+		const float TWO_PI = 6.28318530718;
+		
+		float sdRoundRect(vec2 p, vec2 size, float radius) {
+		    vec2 q = abs(p) - size + vec2(radius);
+		    return length(max(q, 0.0)) - radius;
+		}
+		
+		void main() {
+			vec2 fragCoord = v_UV * u_Resolution;
+			vec2 p = fragCoord - u_Center;
+			vec2 halfSize = 0.5 * u_Size;
+
+			float dist = sdRoundRect(p, halfSize, u_Radius);
+			float alpha = 1.0 - smoothstep(0.0, u_Blur, dist);
+			
+			// vec3 rgb = u_ShadowColor.rgb * alpha;
+			vec3 rgb = u_ShadowColor.rgb;
+			gl_FragColor = vec4(rgb, alpha);
+		}
+    """.trimIndent()
+	// endregion
+
+	fun invalidate() {
+		dirty = true
+	}
+
 	override fun onSurfaceCreated(p0: GL10?, p1: EGLConfig?) {
 		GLES20.glEnable(GLES20.GL_BLEND)
+//		(srcColor × srcFactor) + (dstColor × dstFactor) src 쉐이더에서 칠하는 색, dst 는 배경색
 		GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+//		GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA)
 		lastMs = System.currentTimeMillis()
-
-		// 1) 클리어 컬러(배경색) 초기 설정
-		GLES20.glClearColor(1.0f, 1.0f, 1.0f, 1.0f)
 
 		// 2) 정점 버퍼 준비
 		vertexBuffer = ByteBuffer
 			.allocateDirect(quadVertices.size * BYTES_PER_FLOAT)
 			.order(ByteOrder.nativeOrder())
 			.asFloatBuffer()
-			.put(quadVertices)
-		vertexBuffer.position(0)
+			.apply {
+				put(quadVertices)
+				position(0)
+			}
 
 		// 3) 셰이더 컴파일 & 프로그램 링크
 		val vertexShader = compileShader(GLES20.GL_VERTEX_SHADER, vertexShaderCode)
@@ -146,24 +142,33 @@ class BoxShadowRenderer : GLSurfaceView.Renderer {
 		// 4) attribute/uniform 위치 조회
 		aPositionLocation = GLES20.glGetAttribLocation(program, "a_Position")
 		uTimeLocation = GLES20.glGetUniformLocation(program, "u_Time")
-		uAspectInvLocation = GLES20.glGetUniformLocation(program, "u_AspectInv")
+		uResolution = GLES20.glGetUniformLocation(program, "u_Resolution")
+		uRadius = GLES20.glGetUniformLocation(program, "u_Radius")
+		uBlur = GLES20.glGetUniformLocation(program, "u_Blur")
+		uSoftness = GLES20.glGetUniformLocation(program, "u_Softness")
+		uShadowColor = GLES20.glGetUniformLocation(program, "u_ShadowColor")
+		uColor1 = GLES20.glGetUniformLocation(program, "u_Color1")
+		uColor2 = GLES20.glGetUniformLocation(program, "u_Color2")
+		uCenter = GLES20.glGetUniformLocation(program, "u_Center")
+		uSize = GLES20.glGetUniformLocation(program, "u_Size")
+		uOffset = GLES20.glGetUniformLocation(program, "u_Offset")
 
 		// (선택) 유효성 검사
 		validateProgram(program)
 	}
 
 	override fun onSurfaceChanged(p0: GL10?, width: Int, height: Int) {
-		// 그릴 영역 지정 (픽셀 단위)
 		GLES20.glViewport(0, 0, width, height)
-
-
-		val aspectInv = height.toFloat() / width.toFloat()  // ★ height / width
 		GLES20.glUseProgram(program)
-		GLES20.glUniform1f(uAspectInvLocation, aspectInv)
+		GLES20.glUniform2f(uResolution, width.toFloat(), height.toFloat())
 	}
 
 	override fun onDrawFrame(unused: GL10?) {
 		// 1) 배경 지우기
+		if (dirty) {
+			GLES20.glClearColor(backgroundColor[0], backgroundColor[1], backgroundColor[2], backgroundColor[3])
+		}
+
 		GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
 
 		// 2) 프로그램 사용
@@ -177,6 +182,24 @@ class BoxShadowRenderer : GLSurfaceView.Renderer {
 			accumulatedTime %= (2f * Math.PI.toFloat() / 0.8f)
 		}
 		GLES20.glUniform1f(uTimeLocation, accumulatedTime)
+
+		if (dirty) {
+			cachedTargetViewX = (buttonRect.left + buttonRect.right) * 0.5f
+			cachedTargetViewY = (buttonRect.top + buttonRect.bottom) * 0.5f
+			cachedTargetViewWidth = (buttonRect.right - buttonRect.left)
+			cachedTargetViewHeight = (buttonRect.bottom - buttonRect.top)
+			dirty = false
+
+			GLES20.glUniform2f(uCenter, cachedTargetViewX, cachedTargetViewY)
+			GLES20.glUniform2f(uSize, cachedTargetViewWidth, cachedTargetViewHeight)
+			GLES20.glUniform1f(uRadius, radiusPx)
+			GLES20.glUniform1f(uBlur, blurPx)
+			GLES20.glUniform2f(uOffset, shadowOffset[0], shadowOffset[1])
+			GLES20.glUniform1f(uSoftness, softness)
+			GLES20.glUniform4f(uShadowColor, shadowColor[0], shadowColor[1], shadowColor[2], shadowColor[3])
+			GLES20.glUniform4f(uColor1, color1[0], color1[1], color1[2], color1[3])
+			GLES20.glUniform4f(uColor2, color2[0], color2[1], color2[2], color2[3])
+		}
 
 		// 3) 정점 속성 포인터 설정
 		//    CPU의 vertexBuffer → a_Position으로 연결
@@ -254,7 +277,6 @@ class BoxShadowRenderer : GLSurfaceView.Renderer {
 	// endregion
 
 	companion object {
-		private const val TAG = "BackgroundEffectRenderer"
+		private const val TAG = "GradientShadowRenderer"
 	}
-
 }
