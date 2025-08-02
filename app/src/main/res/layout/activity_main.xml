@@ -15,7 +15,7 @@
 				android:layout_width="100dp"
 				android:layout_height="100dp"
 				android:layout_gravity="center"
-				android:background="@android:color/white"/>
+				android:background="@drawable/circle_shape"/>
 
 	</com.example.myopengltest.shadowview.GradientShadowSurfaceContainer>
 

@@ -13,12 +13,14 @@ import javax.microedition.khronos.opengles.GL10
 class GradientShadowRenderer: Renderer {
 	val buttonRect = RectF(100f, 300f, 100f + 220f, 300f + 64f)
 	var radiusPx = 24f
-	var blurPx = 140f
+	var blurPx = 80f
 	var shadowOffset = floatArrayOf(0f, 12f)
 	var softness = 36f
 	var shadowColor = floatArrayOf(0.396f, 0.89f, 1.0f, 1f) // 기본 청록
 	var color1 = floatArrayOf(0.396f, 0.89f, 1.0f, 1f) // 기본 청록
 	var color2 = floatArrayOf(1.0f, 0.49f, 0.85f, 1f) // 기본 핑크
+//	var color1 = floatArrayOf(0.949f, 0.765f, 0.804f, 1.0f)
+//	var color2 = floatArrayOf(0.773f, 0.890f, 0.945f, 1.0f)
 	var backgroundColor = floatArrayOf(1f, 1f, 1f, 1f) // 기본 배경색
 
 	// 화면 전체를 덮는 사각형 Vertex
@@ -99,15 +101,23 @@ class GradientShadowRenderer: Renderer {
 		}
 		
 		void main() {
-			vec2 fragCoord = v_UV * u_Resolution;
+			// vec2 fragCoord = v_UV * u_Resolution;
+			vec2 fragCoord = gl_FragCoord.xy;
 			vec2 p = fragCoord - u_Center;
 			vec2 halfSize = 0.5 * u_Size;
-
-			float dist = sdRoundRect(p, halfSize, u_Radius);
-			float alpha = 1.0 - smoothstep(0.0, u_Blur, dist);
+			float dist = sdRoundRect(p, halfSize, halfSize.x);
 			
-			// vec3 rgb = u_ShadowColor.rgb * alpha;
-			vec3 rgb = u_ShadowColor.rgb;
+			float angle = 0.8 * u_Time;
+			vec2 dir = vec2(cos(angle), sin(angle));
+			vec2 pUnit = p == vec2(0.0) ? vec2(1.0, 0.0) : normalize(p);
+			float g = clamp(0.5 + dot(pUnit, dir)*0.5, 0.0, 1.0);
+			vec4 grad = mix(u_Color1, u_Color2, g);
+
+			float alpha = 1.0 - smoothstep(0.0, u_Blur, dist);
+
+			// vec3 rgb = grad.rgb * grad.a;
+			vec3 rgb = grad.rgb;
+			// gl_FragColor = vec4(rgb, alpha * grad.a);
 			gl_FragColor = vec4(rgb, alpha);
 		}
     """.trimIndent()
