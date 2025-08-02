@@ -105,7 +105,7 @@ class GradientShadowRenderer: Renderer {
 			vec2 fragCoord = gl_FragCoord.xy;
 			vec2 p = fragCoord - u_Center;
 			vec2 halfSize = 0.5 * u_Size;
-			float dist = sdRoundRect(p, halfSize, halfSize.x);
+			float dist = sdRoundRect(p, halfSize, halfSize.y);
 			
 			float angle = 0.8 * u_Time;
 			vec2 dir = vec2(cos(angle), sin(angle));
